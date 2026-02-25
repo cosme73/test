@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import concurrent.futures
-import psutils
+import psutil
 from llama_cpp import Llama
 
 # ─────────────────────────────────────────────────────────────
@@ -73,7 +73,10 @@ def procesar_en_paralelo(textos: list[str], llm: Llama) -> list[dict]:
     lock = threading.Lock()
 
     def _worker(idx: int, texto: str):
-        res = _responder(idx, texto, llm)
+        try:
+            res = _responder(idx, texto, llm)
+        except Exception as exc:
+            res = {"idx": idx, "texto": texto, "respuesta": None, "error": str(exc)}
         with lock:
             resultados[idx] = res
 
@@ -93,8 +96,15 @@ def procesar_en_paralelo(textos: list[str], llm: Llama) -> list[dict]:
 def _mostrar_resultados(resultados: list[dict]):
     print(f"\n{'='*60}  RESULTADOS  {'='*60}")
     for res in resultados:
-        print(f"\n[{res['idx']+1}] Entrada : {res['texto'][:80]}{'...' if len(res['texto'])>80 else ''}")
-        print(f"     Respuesta: {res['respuesta']}")
+        if res is None:
+            print("\n[?] Sin resultado (error interno)")
+            continue
+        entrada = res['texto'][:80] + ('...' if len(res['texto']) > 80 else '')
+        print(f"\n[{res['idx']+1}] Entrada : {entrada}")
+        if res.get('error'):
+            print(f"     ERROR   : {res['error']}")
+        else:
+            print(f"     Respuesta: {res['respuesta']}")
     print(f"\n{'='*60}")
 
 
