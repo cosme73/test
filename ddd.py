@@ -86,73 +86,83 @@ def comparar_y_generar_columnas(fila_excel, json_data):
 
     return nuevas_columnas
 
+def leer_excel(ruta):
+    """Lee el archivo de Excel y lo retorna como un DataFrame."""
+    print(f"Cargando Excel de entrada: {ruta}")
+    try:
+        return pd.read_excel(ruta)
+    except Exception as e:
+        print(f"Error al leer el Excel {ruta}. Verifica la ruta o si tienes openpyxl instalado: {e}")
+        return None
+
+def guardar_excel(lista_resultados, ruta_salida):
+    """Recibe una lista de diccionarios y los guarda en un archivo Excel."""
+    df_salida = pd.DataFrame(lista_resultados)
+    try:
+        df_salida.to_excel(ruta_salida, index=False)
+        print(f"\n===========================================")
+        print(f"PROCESO TERMINADO CON ÉXITO")
+        print(f"Archivo guardado en: {ruta_salida}")
+        print(f"===========================================")
+    except Exception as e:
+        print(f"Error al guardar el Excel de salida: {e}")
+
+def procesar_fila(fila, directorio_audio, model_audio, model_llm):
+    """Procesa una sola fila del Excel: busca audio, procesa IA y compara."""
+    resultado_fila = fila.to_dict()
+    dni = fila.get('DNI', None)
+    
+    if pd.isna(dni):
+        print("  -> DNI nulo o no válido, omitiendo audio...")
+        return resultado_fila
+        
+    ruta_audio = buscar_audio_por_dni(directorio_audio, dni)
+    
+    if ruta_audio:
+        print(f"  -> Audio encontrado: {ruta_audio}")
+        try:
+            # Procesamos el audio con Whisper y luego extraemos JSON con el LLM
+            json_str = proceso_completo(model_audio, model_llm, ruta_audio)
+            
+            # Comparamos los resultados con el excel
+            nuevas_columnas = comparar_y_generar_columnas(fila, json_str)
+            
+            # Unimos ambas partes de datos
+            resultado_fila.update(nuevas_columnas)
+            print("  -> Extracción y validación completados.")
+            
+        except Exception as e:
+            print(f"  -> [ERROR] Falló el procesamiento del audio: {e}")
+    else:
+        print(f"  -> [Aviso] No se encontró ningún audio con el DNI: {dni}")
+        
+    return resultado_fila
+
 def procesar_lote_excel(ruta_excel_in, ruta_excel_out, directorio_audio):
     """
-    Flujo principal: Lee el Excel, recorre fila por fila, busca el audio,
-    llama a la IA, extrae JSON, compara y guarda en un Excel de salida.
+    Función orquestadora (Main): Coordina la lectura, los modelos, 
+    la iteración de filas y el guardado final.
     """
-    print(f"Cargando Excel de entrada: {ruta_excel_in}")
-    try:
-        df = pd.read_excel(ruta_excel_in)
-    except Exception as e:
-        print(f"Error al leer el Excel. Verifica la ruta o si tienes openpyxl instalado: {e}")
+    # 1. Leer Excel
+    df = leer_excel(ruta_excel_in)
+    if df is None:
         return
 
-    # 1. Cargamos los modelos (Whisper y LLM) a memoria sólo una vez
+    # 2. Cargar modelos en memoria (solo 1 vez por todo el batch)
     print("Inicializando modelos...")
     model_audio = incializar_audio_model()
     model_llm = inicializar_llm()
     
     lista_resultados = []
 
-    # 2. Recorremos el DataFrame (Excel) fila por fila
+    # 3. Iterar fila por fila procesando de forma individual
     for index, fila in df.iterrows():
-        dni = fila.get('DNI', None)
-        print(f"\n[{index+1}/{len(df)}] Procesando Fila - DNI esperado: {dni}")
+        print(f"\n[{index+1}/{len(df)}] Procesando Fila - DNI esperado: {fila.get('DNI', None)}")
+        fila_procesada = procesar_fila(fila, directorio_audio, model_audio, model_llm)
+        lista_resultados.append(fila_procesada)
         
-        # Convertimos la fila a diccionario para mantener los datos de entrada
-        resultado_fila = fila.to_dict()
-        
-        if pd.isna(dni):
-            print("  -> DNI nulo o no válido, omitiendo audio...")
-            lista_resultados.append(resultado_fila)
-            continue
-            
-        # 3. Buscamos el audio usando la función
-        ruta_audio = buscar_audio_por_dni(directorio_audio, dni)
-        
-        if ruta_audio:
-            print(f"  -> Audio encontrado: {ruta_audio}")
-            try:Procesamos el audio con Whisper y luego extraemos JSON con el LLM
-                json_str = proceso_completo(model_audio, model_llm, ruta_audioimizado.py
-                json_str = audio_a_json_directo(ruta_audio, processor, model, device)
-                
-                # 5. Comparamos los resultados con el excel
-                nuevas_columnas = comparar_y_generar_columnas(fila, json_str)
-                
-                # Unimos ambas partes de datos
-                resultado_fila.update(nuevas_columnas)
-                print("  -> Extracción y validación completados.")
-                
-            except Exception as e:
-                print(f"  -> [ERROR] Falló el procesamiento del audio: {e}")
-        else:
-            print(f"  -> [Aviso] No se encontró ningún audio con el DNI: {dni}")
-            
-        # Almacenamos el resultado independientemente de si encontró o no audio
-        lista_resultados.append(resultado_fila)
-        
-    # 6. Guardamos los resultados en el archivo Excel Final
-    df_salida = pd.DataFrame(lista_resultados)
-    
-    try:
-        df_salida.to_excel(ruta_excel_out, index=False)
-        print(f"\n===========================================")
-        print(f"PROCESO TERMINADO CON ÉXITO")
-        print(f"Archivo guardado en: {ruta_excel_out}")
-        print(f"===========================================")
-    except Exception as e:
-        print(f"Error al guardar el Excel de salida: {e}")
+    # 4. Guardar archivo final
+    guardar_excel(lista_resultados, ruta_excel_out)
 
 if __name__ == "__main__":
     # CONFIGURA TUS RUTAS AQUÍ
